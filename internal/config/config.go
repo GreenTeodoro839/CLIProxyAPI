@@ -435,6 +435,11 @@ type CloakConfig struct {
 // ClaudeKey represents the configuration for a Claude API key,
 // including the API key itself and an optional base URL for the API endpoint.
 type ClaudeKey struct {
+	// Name is an optional human-readable identifier for this credential. It is used
+	// only for statistics/management display (e.g. the api-key-usage endpoint and
+	// config listings); it does not affect upstream requests or routing.
+	Name string `yaml:"name,omitempty" json:"name,omitempty"`
+
 	// APIKey is the authentication key for accessing Claude API services.
 	APIKey string `yaml:"api-key" json:"api-key"`
 
@@ -498,6 +503,11 @@ func (m ClaudeModel) GetForceMapping() bool { return m.ForceMapping }
 // CodexKey represents the configuration for a Codex API key,
 // including the API key itself and an optional base URL for the API endpoint.
 type CodexKey struct {
+	// Name is an optional human-readable identifier for this credential. It is used
+	// only for statistics/management display (e.g. the api-key-usage endpoint and
+	// config listings); it does not affect upstream requests or routing.
+	Name string `yaml:"name,omitempty" json:"name,omitempty"`
+
 	// APIKey is the authentication key for accessing Codex API services.
 	APIKey string `yaml:"api-key" json:"api-key"`
 
@@ -553,6 +563,11 @@ func (m CodexModel) GetForceMapping() bool { return m.ForceMapping }
 // GeminiKey represents the configuration for a Gemini API key,
 // including optional overrides for upstream base URL, proxy routing, and headers.
 type GeminiKey struct {
+	// Name is an optional human-readable identifier for this credential. It is used
+	// only for statistics/management display (e.g. the api-key-usage endpoint and
+	// config listings); it does not affect upstream requests or routing.
+	Name string `yaml:"name,omitempty" json:"name,omitempty"`
+
 	// APIKey is the authentication key for accessing Gemini API services.
 	APIKey string `yaml:"api-key" json:"api-key"`
 
@@ -985,6 +1000,7 @@ func (cfg *Config) SanitizeCodexKeys() {
 	out := make([]CodexKey, 0, len(cfg.CodexKey))
 	for i := range cfg.CodexKey {
 		e := cfg.CodexKey[i]
+		e.Name = strings.TrimSpace(e.Name)
 		e.Prefix = normalizeModelPrefix(e.Prefix)
 		e.BaseURL = strings.TrimSpace(e.BaseURL)
 		e.Headers = NormalizeHeaders(e.Headers)
@@ -1004,6 +1020,7 @@ func (cfg *Config) SanitizeClaudeKeys() {
 	}
 	for i := range cfg.ClaudeKey {
 		entry := &cfg.ClaudeKey[i]
+		entry.Name = strings.TrimSpace(entry.Name)
 		entry.Prefix = normalizeModelPrefix(entry.Prefix)
 		entry.Headers = NormalizeHeaders(entry.Headers)
 		entry.ExcludedModels = NormalizeExcludedModels(entry.ExcludedModels)
@@ -1021,6 +1038,7 @@ func (cfg *Config) SanitizeGeminiKeys() {
 	out := cfg.GeminiKey[:0]
 	for i := range cfg.GeminiKey {
 		entry := cfg.GeminiKey[i]
+		entry.Name = strings.TrimSpace(entry.Name)
 		entry.APIKey = strings.TrimSpace(entry.APIKey)
 		if entry.APIKey == "" {
 			continue

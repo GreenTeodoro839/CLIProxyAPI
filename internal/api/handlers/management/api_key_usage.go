@@ -10,6 +10,7 @@ import (
 )
 
 type apiKeyUsageEntry struct {
+	Name           string                         `json:"name,omitempty"`
 	Success        int64                          `json:"success"`
 	Failed         int64                          `json:"failed"`
 	RecentRequests []coreauth.RecentRequestBucket `json:"recent_requests"`
@@ -90,6 +91,10 @@ func (h *Handler) GetAPIKeyUsage(c *gin.Context) {
 				baseURL = strings.TrimSpace(auth.Attributes["base-url"])
 			}
 		}
+		name := ""
+		if auth.Attributes != nil {
+			name = strings.TrimSpace(auth.Attributes["name"])
+		}
 		compositeKey := baseURL + "|" + apiKey
 		provider := apiKeyUsageProviderKey(auth)
 
@@ -103,10 +108,14 @@ func (h *Handler) GetAPIKeyUsage(c *gin.Context) {
 			existing.Success += auth.Success
 			existing.Failed += auth.Failed
 			existing.RecentRequests = mergeRecentRequestBuckets(existing.RecentRequests, recent)
+			if existing.Name == "" && name != "" {
+				existing.Name = name
+			}
 			providerBucket[compositeKey] = existing
 			continue
 		}
 		providerBucket[compositeKey] = apiKeyUsageEntry{
+			Name:           name,
 			Success:        auth.Success,
 			Failed:         auth.Failed,
 			RecentRequests: recent,

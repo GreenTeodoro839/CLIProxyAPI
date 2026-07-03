@@ -61,6 +61,9 @@ func (s *ConfigSynthesizer) synthesizeGeminiKeys(ctx *SynthesisContext) []*corea
 			"source":  fmt.Sprintf("config:gemini[%s]", token),
 			"api_key": key,
 		}
+		if name := strings.TrimSpace(entry.Name); name != "" {
+			attrs["name"] = name
+		}
 		metadata := map[string]any{}
 		if entry.DisableCooling {
 			metadata["disable_cooling"] = true
@@ -115,6 +118,9 @@ func (s *ConfigSynthesizer) synthesizeClaudeKeys(ctx *SynthesisContext) []*corea
 		attrs := map[string]string{
 			"source":  fmt.Sprintf("config:claude[%s]", token),
 			"api_key": key,
+		}
+		if name := strings.TrimSpace(ck.Name); name != "" {
+			attrs["name"] = name
 		}
 		metadata := map[string]any{}
 		if ck.DisableCooling {
@@ -173,6 +179,9 @@ func (s *ConfigSynthesizer) synthesizeCodexKeys(ctx *SynthesisContext) []*coreau
 		attrs := map[string]string{
 			"source":  fmt.Sprintf("config:codex[%s]", token),
 			"api_key": key,
+		}
+		if name := strings.TrimSpace(ck.Name); name != "" {
+			attrs["name"] = name
 		}
 		metadata := map[string]any{}
 		if ck.DisableCooling {
@@ -342,6 +351,9 @@ func (s *ConfigSynthesizer) synthesizeVertexCompat(ctx *SynthesisContext) []*cor
 			"source":       fmt.Sprintf("config:vertex-apikey[%s]", token),
 			"base_url":     base,
 			"provider_key": providerName,
+		}
+		if name := strings.TrimSpace(compat.Name); name != "" {
+			attrs["name"] = name
 		}
 		if compat.Priority != 0 {
 			attrs["priority"] = strconv.Itoa(compat.Priority)

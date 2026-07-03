@@ -147,6 +147,7 @@ func (h *Handler) PutGeminiKeys(c *gin.Context) {
 }
 func (h *Handler) PatchGeminiKey(c *gin.Context) {
 	type geminiKeyPatch struct {
+		Name           *string            `json:"name"`
 		APIKey         *string            `json:"api-key"`
 		Prefix         *string            `json:"prefix"`
 		BaseURL        *string            `json:"base-url"`
@@ -156,6 +157,7 @@ func (h *Handler) PatchGeminiKey(c *gin.Context) {
 	}
 	var body struct {
 		Index *int            `json:"index"`
+		Name  *string         `json:"name"`
 		Match *string         `json:"match"`
 		Value *geminiKeyPatch `json:"value"`
 	}
@@ -169,6 +171,16 @@ func (h *Handler) PatchGeminiKey(c *gin.Context) {
 	targetIndex := -1
 	if body.Index != nil && *body.Index >= 0 && *body.Index < len(h.cfg.GeminiKey) {
 		targetIndex = *body.Index
+	}
+	if targetIndex == -1 && body.Name != nil {
+		if name := strings.TrimSpace(*body.Name); name != "" {
+			for i := range h.cfg.GeminiKey {
+				if h.cfg.GeminiKey[i].Name == name {
+					targetIndex = i
+					break
+				}
+			}
+		}
 	}
 	if targetIndex == -1 && body.Match != nil {
 		match := strings.TrimSpace(*body.Match)
@@ -187,6 +199,9 @@ func (h *Handler) PatchGeminiKey(c *gin.Context) {
 	}
 
 	entry := h.cfg.GeminiKey[targetIndex]
+	if body.Value.Name != nil {
+		entry.Name = strings.TrimSpace(*body.Value.Name)
+	}
 	if body.Value.APIKey != nil {
 		trimmed := strings.TrimSpace(*body.Value.APIKey)
 		if trimmed == "" {
@@ -220,6 +235,23 @@ func (h *Handler) PatchGeminiKey(c *gin.Context) {
 func (h *Handler) DeleteGeminiKey(c *gin.Context) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if name := strings.TrimSpace(c.Query("name")); name != "" {
+		out := make([]config.GeminiKey, 0, len(h.cfg.GeminiKey))
+		for _, v := range h.cfg.GeminiKey {
+			if strings.TrimSpace(v.Name) == name {
+				continue
+			}
+			out = append(out, v)
+		}
+		if len(out) != len(h.cfg.GeminiKey) {
+			h.cfg.GeminiKey = out
+			h.cfg.SanitizeGeminiKeys()
+			h.persistLocked(c)
+		} else {
+			c.JSON(404, gin.H{"error": "item not found"})
+		}
+		return
+	}
 	if val := strings.TrimSpace(c.Query("api-key")); val != "" {
 		if baseRaw, okBase := c.GetQuery("base-url"); okBase {
 			base := strings.TrimSpace(baseRaw)
@@ -307,6 +339,7 @@ func (h *Handler) PutClaudeKeys(c *gin.Context) {
 }
 func (h *Handler) PatchClaudeKey(c *gin.Context) {
 	type claudeKeyPatch struct {
+		Name                    *string               `json:"name"`
 		APIKey                  *string               `json:"api-key"`
 		Prefix                  *string               `json:"prefix"`
 		BaseURL                 *string               `json:"base-url"`
@@ -318,6 +351,7 @@ func (h *Handler) PatchClaudeKey(c *gin.Context) {
 	}
 	var body struct {
 		Index *int            `json:"index"`
+		Name  *string         `json:"name"`
 		Match *string         `json:"match"`
 		Value *claudeKeyPatch `json:"value"`
 	}
@@ -331,6 +365,16 @@ func (h *Handler) PatchClaudeKey(c *gin.Context) {
 	targetIndex := -1
 	if body.Index != nil && *body.Index >= 0 && *body.Index < len(h.cfg.ClaudeKey) {
 		targetIndex = *body.Index
+	}
+	if targetIndex == -1 && body.Name != nil {
+		if name := strings.TrimSpace(*body.Name); name != "" {
+			for i := range h.cfg.ClaudeKey {
+				if h.cfg.ClaudeKey[i].Name == name {
+					targetIndex = i
+					break
+				}
+			}
+		}
 	}
 	if targetIndex == -1 && body.Match != nil {
 		match := strings.TrimSpace(*body.Match)
@@ -347,6 +391,9 @@ func (h *Handler) PatchClaudeKey(c *gin.Context) {
 	}
 
 	entry := h.cfg.ClaudeKey[targetIndex]
+	if body.Value.Name != nil {
+		entry.Name = strings.TrimSpace(*body.Value.Name)
+	}
 	if body.Value.APIKey != nil {
 		entry.APIKey = strings.TrimSpace(*body.Value.APIKey)
 	}
@@ -380,6 +427,23 @@ func (h *Handler) PatchClaudeKey(c *gin.Context) {
 func (h *Handler) DeleteClaudeKey(c *gin.Context) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if name := strings.TrimSpace(c.Query("name")); name != "" {
+		out := make([]config.ClaudeKey, 0, len(h.cfg.ClaudeKey))
+		for _, v := range h.cfg.ClaudeKey {
+			if strings.TrimSpace(v.Name) == name {
+				continue
+			}
+			out = append(out, v)
+		}
+		if len(out) != len(h.cfg.ClaudeKey) {
+			h.cfg.ClaudeKey = out
+			h.cfg.SanitizeClaudeKeys()
+			h.persistLocked(c)
+		} else {
+			c.JSON(404, gin.H{"error": "item not found"})
+		}
+		return
+	}
 	if val := strings.TrimSpace(c.Query("api-key")); val != "" {
 		if baseRaw, okBase := c.GetQuery("base-url"); okBase {
 			base := strings.TrimSpace(baseRaw)
@@ -607,6 +671,7 @@ func (h *Handler) PutVertexCompatKeys(c *gin.Context) {
 }
 func (h *Handler) PatchVertexCompatKey(c *gin.Context) {
 	type vertexCompatPatch struct {
+		Name           *string                     `json:"name"`
 		APIKey         *string                     `json:"api-key"`
 		Prefix         *string                     `json:"prefix"`
 		BaseURL        *string                     `json:"base-url"`
@@ -617,6 +682,7 @@ func (h *Handler) PatchVertexCompatKey(c *gin.Context) {
 	}
 	var body struct {
 		Index *int               `json:"index"`
+		Name  *string            `json:"name"`
 		Match *string            `json:"match"`
 		Value *vertexCompatPatch `json:"value"`
 	}
@@ -630,6 +696,16 @@ func (h *Handler) PatchVertexCompatKey(c *gin.Context) {
 	targetIndex := -1
 	if body.Index != nil && *body.Index >= 0 && *body.Index < len(h.cfg.VertexCompatAPIKey) {
 		targetIndex = *body.Index
+	}
+	if targetIndex == -1 && body.Name != nil {
+		if name := strings.TrimSpace(*body.Name); name != "" {
+			for i := range h.cfg.VertexCompatAPIKey {
+				if h.cfg.VertexCompatAPIKey[i].Name == name {
+					targetIndex = i
+					break
+				}
+			}
+		}
 	}
 	if targetIndex == -1 && body.Match != nil {
 		match := strings.TrimSpace(*body.Match)
@@ -648,6 +724,9 @@ func (h *Handler) PatchVertexCompatKey(c *gin.Context) {
 	}
 
 	entry := h.cfg.VertexCompatAPIKey[targetIndex]
+	if body.Value.Name != nil {
+		entry.Name = strings.TrimSpace(*body.Value.Name)
+	}
 	if body.Value.APIKey != nil {
 		trimmed := strings.TrimSpace(*body.Value.APIKey)
 		if trimmed == "" {
@@ -692,6 +771,23 @@ func (h *Handler) PatchVertexCompatKey(c *gin.Context) {
 func (h *Handler) DeleteVertexCompatKey(c *gin.Context) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if name := strings.TrimSpace(c.Query("name")); name != "" {
+		out := make([]config.VertexCompatKey, 0, len(h.cfg.VertexCompatAPIKey))
+		for _, v := range h.cfg.VertexCompatAPIKey {
+			if strings.TrimSpace(v.Name) == name {
+				continue
+			}
+			out = append(out, v)
+		}
+		if len(out) != len(h.cfg.VertexCompatAPIKey) {
+			h.cfg.VertexCompatAPIKey = out
+			h.cfg.SanitizeVertexCompatKeys()
+			h.persistLocked(c)
+		} else {
+			c.JSON(404, gin.H{"error": "item not found"})
+		}
+		return
+	}
 	if val := strings.TrimSpace(c.Query("api-key")); val != "" {
 		if baseRaw, okBase := c.GetQuery("base-url"); okBase {
 			base := strings.TrimSpace(baseRaw)
@@ -963,6 +1059,7 @@ func (h *Handler) PutCodexKeys(c *gin.Context) {
 }
 func (h *Handler) PatchCodexKey(c *gin.Context) {
 	type codexKeyPatch struct {
+		Name           *string              `json:"name"`
 		APIKey         *string              `json:"api-key"`
 		Prefix         *string              `json:"prefix"`
 		BaseURL        *string              `json:"base-url"`
@@ -973,6 +1070,7 @@ func (h *Handler) PatchCodexKey(c *gin.Context) {
 	}
 	var body struct {
 		Index *int           `json:"index"`
+		Name  *string        `json:"name"`
 		Match *string        `json:"match"`
 		Value *codexKeyPatch `json:"value"`
 	}
@@ -986,6 +1084,16 @@ func (h *Handler) PatchCodexKey(c *gin.Context) {
 	targetIndex := -1
 	if body.Index != nil && *body.Index >= 0 && *body.Index < len(h.cfg.CodexKey) {
 		targetIndex = *body.Index
+	}
+	if targetIndex == -1 && body.Name != nil {
+		if name := strings.TrimSpace(*body.Name); name != "" {
+			for i := range h.cfg.CodexKey {
+				if h.cfg.CodexKey[i].Name == name {
+					targetIndex = i
+					break
+				}
+			}
+		}
 	}
 	if targetIndex == -1 && body.Match != nil {
 		match := strings.TrimSpace(*body.Match)
@@ -1002,6 +1110,9 @@ func (h *Handler) PatchCodexKey(c *gin.Context) {
 	}
 
 	entry := h.cfg.CodexKey[targetIndex]
+	if body.Value.Name != nil {
+		entry.Name = strings.TrimSpace(*body.Value.Name)
+	}
 	if body.Value.APIKey != nil {
 		entry.APIKey = strings.TrimSpace(*body.Value.APIKey)
 	}
@@ -1039,6 +1150,23 @@ func (h *Handler) PatchCodexKey(c *gin.Context) {
 func (h *Handler) DeleteCodexKey(c *gin.Context) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if name := strings.TrimSpace(c.Query("name")); name != "" {
+		out := make([]config.CodexKey, 0, len(h.cfg.CodexKey))
+		for _, v := range h.cfg.CodexKey {
+			if strings.TrimSpace(v.Name) == name {
+				continue
+			}
+			out = append(out, v)
+		}
+		if len(out) != len(h.cfg.CodexKey) {
+			h.cfg.CodexKey = out
+			h.cfg.SanitizeCodexKeys()
+			h.persistLocked(c)
+		} else {
+			c.JSON(404, gin.H{"error": "item not found"})
+		}
+		return
+	}
 	if val := strings.TrimSpace(c.Query("api-key")); val != "" {
 		if baseRaw, okBase := c.GetQuery("base-url"); okBase {
 			base := strings.TrimSpace(baseRaw)
