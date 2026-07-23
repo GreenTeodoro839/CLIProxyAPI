@@ -26,8 +26,66 @@ func TestClaudeErrorExtractsOpenAIStyleUpstreamJSON(t *testing.T) {
 	if got.Error.Type != "invalid_request_error" {
 		t.Fatalf("error.type = %q, want invalid_request_error", got.Error.Type)
 	}
-	if got.Error.Message != "Your input exceeds the context window of this model. Please adjust your input and try again." {
+	if got.Error.Message != "prompt is too long: Your input exceeds the context window of this model. Please adjust your input and try again." {
 		t.Fatalf("error.message = %q", got.Error.Message)
+	}
+}
+
+func TestClaudeErrorNormalizesContextLimitSignalsForClaudeCode(t *testing.T) {
+	tests := []struct {
+		name        string
+		status      int
+		errText     string
+		wantType    string
+		wantMessage string
+	}{
+		{
+			name:        "top-level Codex context code",
+			status:      http.StatusBadRequest,
+			errText:     `{"code":"context_length_exceeded","message":"Input rejected."}`,
+			wantType:    "invalid_request_error",
+			wantMessage: "prompt is too long: Input rejected.",
+		},
+		{
+			name:        "native compaction hard boundary",
+			status:      http.StatusBadRequest,
+			errText:     "codex native compaction failed at the configured 272000-token context boundary: upstream rejected compaction",
+			wantType:    "invalid_request_error",
+			wantMessage: "prompt is too long: codex native compaction failed at the configured 272000-token context boundary: upstream rejected compaction",
+		},
+		{
+			name:        "already compatible",
+			status:      http.StatusBadRequest,
+			errText:     "prompt is too long: 280000 tokens > 272000",
+			wantType:    "invalid_request_error",
+			wantMessage: "prompt is too long: 280000 tokens > 272000",
+		},
+		{
+			name:        "unrelated invalid request",
+			status:      http.StatusBadRequest,
+			errText:     "invalid tool schema",
+			wantType:    "invalid_request_error",
+			wantMessage: "invalid tool schema",
+		},
+		{
+			name:        "large request body is not a context error",
+			status:      http.StatusRequestEntityTooLarge,
+			errText:     "request body exceeds the maximum allowed size",
+			wantType:    "request_too_large",
+			wantMessage: "request body exceeds the maximum allowed size",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotType, gotMessage := claudeErrorDetailFromText(tt.status, tt.errText)
+			if gotType != tt.wantType {
+				t.Fatalf("error.type = %q, want %q", gotType, tt.wantType)
+			}
+			if gotMessage != tt.wantMessage {
+				t.Fatalf("error.message = %q, want %q", gotMessage, tt.wantMessage)
+			}
+		})
 	}
 }
 
@@ -70,7 +128,7 @@ func TestWriteClaudeErrorResponseUsesClaudeEnvelope(t *testing.T) {
 	if got := gjson.GetBytes(body, "error.type").String(); got != "invalid_request_error" {
 		t.Fatalf("error.type = %q, want invalid_request_error; body=%s", got, body)
 	}
-	if got := gjson.GetBytes(body, "error.message").String(); got != "Your input exceeds the context window of this model. Please adjust your input and try again." {
+	if got := gjson.GetBytes(body, "error.message").String(); got != "prompt is too long: Your input exceeds the context window of this model. Please adjust your input and try again." {
 		t.Fatalf("error.message = %q; body=%s", got, body)
 	}
 }

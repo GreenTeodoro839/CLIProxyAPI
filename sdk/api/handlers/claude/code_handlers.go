@@ -424,6 +424,9 @@ type claudeErrorResponse struct {
 	Error claudeErrorDetail `json:"error"`
 }
 
+// Claude Code recognizes this literal as a signal to run client-side compaction.
+const claudeCodePromptTooLongMarker = "prompt is too long"
+
 func (h *ClaudeCodeAPIHandler) toClaudeError(msg *interfaces.ErrorMessage) claudeErrorResponse {
 	status := http.StatusInternalServerError
 	errText := http.StatusText(status)
@@ -483,6 +486,7 @@ func claudeErrorDetailFromText(status int, errText string) (string, string) {
 		message = http.StatusText(status)
 	}
 	errType := claudeErrorTypeFromStatus(status)
+	errorCode := ""
 
 	var payload map[string]any
 	if json.Valid([]byte(message)) {
@@ -496,6 +500,9 @@ func claudeErrorDetailFromText(status int, errText string) (string, string) {
 				} else if c, ok := e["code"].(string); ok && strings.TrimSpace(c) != "" {
 					message = strings.TrimSpace(c)
 				}
+				if c, ok := e["code"].(string); ok {
+					errorCode = strings.TrimSpace(c)
+				}
 			} else {
 				if t, ok := payload["type"].(string); ok && strings.TrimSpace(t) != "" && strings.TrimSpace(t) != "error" {
 					errType = strings.TrimSpace(t)
@@ -503,11 +510,47 @@ func claudeErrorDetailFromText(status int, errText string) (string, string) {
 				if m, ok := payload["message"].(string); ok && strings.TrimSpace(m) != "" {
 					message = strings.TrimSpace(m)
 				}
+				if c, ok := payload["code"].(string); ok {
+					errorCode = strings.TrimSpace(c)
+				}
 			}
 		}
 	}
+	if isClaudeContextWindowError(status, errType, errorCode, message) && !strings.Contains(strings.ToLower(message), claudeCodePromptTooLongMarker) {
+		message = claudeCodePromptTooLongMarker + ": " + message
+	}
 
 	return errType, message
+}
+
+func isClaudeContextWindowError(status int, errType, errorCode, message string) bool {
+	if status != http.StatusBadRequest && status != http.StatusRequestEntityTooLarge {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(errorCode)) {
+	case "context_length_exceeded", "context_too_large":
+		return true
+	}
+
+	lowerMessage := strings.ToLower(strings.TrimSpace(message))
+	if strings.Contains(lowerMessage, claudeCodePromptTooLongMarker) {
+		return true
+	}
+	if status == http.StatusRequestEntityTooLarge && strings.Contains(lowerMessage, "context window") {
+		return true
+	}
+	if !strings.EqualFold(strings.TrimSpace(errType), "invalid_request_error") {
+		return false
+	}
+	if strings.Contains(lowerMessage, "codex native compaction") && strings.Contains(lowerMessage, "context boundary") {
+		return true
+	}
+	return strings.Contains(lowerMessage, "context_length_exceeded") ||
+		strings.Contains(lowerMessage, "context_too_large") ||
+		strings.Contains(lowerMessage, "context length exceeded") ||
+		strings.Contains(lowerMessage, "maximum context length") ||
+		strings.Contains(lowerMessage, "too many tokens") ||
+		strings.Contains(lowerMessage, "context window") && strings.Contains(lowerMessage, "exceed")
 }
 
 func claudeErrorTypeFromStatus(status int) string {
