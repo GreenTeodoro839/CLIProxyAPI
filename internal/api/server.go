@@ -95,6 +95,7 @@ func defaultRequestLoggerFactory(cfg *config.Config, configPath string) logging.
 	configDir := filepath.Dir(configPath)
 	logsDir := logging.ResolveLogDirectory(cfg)
 	logger := logging.NewFileRequestLogger(cfg.RequestLog, logsDir, configDir, cfg.ErrorLogsMaxFiles)
+	logger.SetSuccessSummaryPolicy(cfg.RequestLogSuccessSummary, cfg.RequestLogSummaryRotationHours, cfg.RequestLogSummaryMaxFiles)
 	logger.SetHomeEnabled(cfg != nil && cfg.Home.Enabled)
 	return logger
 }
@@ -315,6 +316,7 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	}
 
 	engine.Use(corsMiddleware())
+	engine.Use(middleware.InferenceObservabilityMiddleware())
 	wd, err := os.Getwd()
 	if err != nil {
 		wd = configFilePath
@@ -868,6 +870,7 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.DELETE("/api-keys", s.mgmt.DeleteAPIKeys)
 		mgmt.GET("/api-key-usage", s.mgmt.GetAPIKeyUsage)
 		mgmt.GET("/usage-queue", s.mgmt.GetUsageQueue)
+		mgmt.GET("/observability", s.mgmt.GetObservabilitySnapshot)
 
 		mgmt.GET("/gemini-api-key", s.mgmt.GetGeminiKeys)
 		mgmt.PUT("/gemini-api-key", s.mgmt.PutGeminiKeys)
@@ -1207,11 +1210,22 @@ func (s *Server) unifiedModelsHandler(openaiHandler *openai.OpenAIAPIHandler, cl
 
 		// Route to Claude handler for Anthropic API requests.
 		if isAnthropicModelsRequest(c) {
-			claudeHandler.ClaudeModels(c)
+			claudeHandler.ClaudeModelsWithCodexContextWindow(c, s.codexClaudeClientContextWindow())
 		} else {
 			openaiHandler.OpenAIModels(c)
 		}
 	}
+}
+
+func (s *Server) codexClaudeClientContextWindow() int64 {
+	if s == nil || s.cfg == nil || !s.cfg.Codex.NativeCompaction.Enabled {
+		return 0
+	}
+	contextWindow := s.cfg.Codex.NativeCompaction.ClaudeClientContextWindow
+	if contextWindow <= 0 {
+		return config.DefaultCodexClaudeClientContextWindow
+	}
+	return contextWindow
 }
 
 // handleHomeCodexClientModels builds the Codex client catalog from Home model IDs.
@@ -1857,6 +1871,11 @@ func (s *Server) UpdateClients(cfg *config.Config) {
 		}
 	}
 
+	if s.requestLogger != nil && (oldCfg == nil || oldCfg.RequestLogSuccessSummary != cfg.RequestLogSuccessSummary || oldCfg.RequestLogSummaryRotationHours != cfg.RequestLogSummaryRotationHours || oldCfg.RequestLogSummaryMaxFiles != cfg.RequestLogSummaryMaxFiles) {
+		if setter, ok := s.requestLogger.(interface{ SetSuccessSummaryPolicy(bool, int, int) }); ok {
+			setter.SetSuccessSummaryPolicy(cfg.RequestLogSuccessSummary, cfg.RequestLogSummaryRotationHours, cfg.RequestLogSummaryMaxFiles)
+		}
+	}
 	if oldCfg == nil || oldCfg.DisableCooling != cfg.DisableCooling {
 		auth.SetQuotaCooldownDisabled(cfg.DisableCooling)
 	}

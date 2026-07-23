@@ -434,11 +434,13 @@ func (e *ClaudeExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, r
 			helps.RecordAPIResponseError(ctx, e.cfg, errValidate)
 			return resp, errValidate
 		}
+		var usageBuffer helps.ClaudeStreamUsageBuffer
 		lines := bytes.Split(data, []byte("\n"))
 		for _, line := range lines {
-			if detail, ok := helps.ParseClaudeStreamUsage(line); ok {
-				reporter.Publish(ctx, detail)
-			}
+			usageBuffer.ObserveClaudeStream(line)
+		}
+		if !usageBuffer.Publish(ctx, reporter) {
+			reporter.EnsurePublished(ctx)
 		}
 	} else {
 		reporter.Publish(ctx, helps.ParseClaudeUsage(data))
@@ -622,6 +624,26 @@ func (e *ClaudeExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 		if responseFormat == to {
 			scanner := bufio.NewScanner(decodedBody)
 			scanner.Buffer(nil, 52_428_800) // 50MB
+			var usageBuffer helps.ClaudeStreamUsageBuffer
+			var streamErr error
+			streamComplete := false
+			defer func() {
+				publishCtx := context.WithoutCancel(ctx)
+				if streamErr == nil && !streamComplete {
+					streamErr = ctx.Err()
+				}
+				if streamErr != nil {
+					if detail, ok := usageBuffer.Detail(); ok {
+						reporter.PublishFailureWithDetail(publishCtx, detail, streamErr)
+					} else {
+						reporter.PublishFailure(publishCtx, streamErr)
+					}
+					return
+				}
+				if !usageBuffer.Publish(publishCtx, reporter) {
+					reporter.EnsurePublished(publishCtx)
+				}
+			}()
 			var event bytes.Buffer
 			flushEvent := func() bool {
 				if event.Len() == 0 {
@@ -639,9 +661,7 @@ func (e *ClaudeExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 			for scanner.Scan() {
 				line := scanner.Bytes()
 				helps.AppendAPIResponseChunk(ctx, e.cfg, line)
-				if detail, ok := helps.ParseClaudeStreamUsage(line); ok {
-					reporter.Publish(ctx, detail)
-				}
+				usageBuffer.ObserveClaudeStream(line)
 				line = restoreClaudeOAuthToolNamesFromStreamLine(line, claudeToolPrefix, auth.ToolPrefixDisabled(), oauthToolNamesReverseMap)
 				line = e.restoreResponseModel(line, req.Model)
 				event.Write(line)
@@ -655,25 +675,45 @@ func (e *ClaudeExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 			}
 			if errScan := scanner.Err(); errScan != nil {
 				helps.RecordAPIResponseError(ctx, e.cfg, errScan)
-				reporter.PublishFailure(ctx, errScan)
+				streamErr = errScan
 				select {
 				case out <- cliproxyexecutor.StreamChunk{Err: errScan}:
 				case <-ctx.Done():
 				}
+				return
 			}
+			streamComplete = true
 			return
 		}
 
 		// For other formats, use translation
 		scanner := bufio.NewScanner(decodedBody)
 		scanner.Buffer(nil, 52_428_800) // 50MB
+		var usageBuffer helps.ClaudeStreamUsageBuffer
+		var streamErr error
+		streamComplete := false
+		defer func() {
+			publishCtx := context.WithoutCancel(ctx)
+			if streamErr == nil && !streamComplete {
+				streamErr = ctx.Err()
+			}
+			if streamErr != nil {
+				if detail, ok := usageBuffer.Detail(); ok {
+					reporter.PublishFailureWithDetail(publishCtx, detail, streamErr)
+				} else {
+					reporter.PublishFailure(publishCtx, streamErr)
+				}
+				return
+			}
+			if !usageBuffer.Publish(publishCtx, reporter) {
+				reporter.EnsurePublished(publishCtx)
+			}
+		}()
 		var param any
 		for scanner.Scan() {
 			line := scanner.Bytes()
 			helps.AppendAPIResponseChunk(ctx, e.cfg, line)
-			if detail, ok := helps.ParseClaudeStreamUsage(line); ok {
-				reporter.Publish(ctx, detail)
-			}
+			usageBuffer.ObserveClaudeStream(line)
 			line = restoreClaudeOAuthToolNamesFromStreamLine(line, claudeToolPrefix, auth.ToolPrefixDisabled(), oauthToolNamesReverseMap)
 			line = e.restoreResponseModel(line, req.Model)
 			chunks := sdktranslator.TranslateStream(
@@ -696,12 +736,14 @@ func (e *ClaudeExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 		}
 		if errScan := scanner.Err(); errScan != nil {
 			helps.RecordAPIResponseError(ctx, e.cfg, errScan)
-			reporter.PublishFailure(ctx, errScan)
+			streamErr = errScan
 			select {
 			case out <- cliproxyexecutor.StreamChunk{Err: errScan}:
 			case <-ctx.Done():
 			}
+			return
 		}
+		streamComplete = true
 	}()
 	return &cliproxyexecutor.StreamResult{Headers: httpResp.Header.Clone(), Chunks: out}, nil
 }

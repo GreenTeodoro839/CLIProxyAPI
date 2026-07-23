@@ -30,6 +30,26 @@ func TestExtractClaudeCodeSessionIDFromHeader(t *testing.T) {
 	}
 }
 
+func TestExtractClaudeCodeAgentIDFromHeadersAndContext(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	ginCtx, _ := gin.CreateTestContext(recorder)
+	ginCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	ginCtx.Request.Header.Set(ClaudeCodeAgentHeader, "gin-agent")
+	ctx := context.WithValue(context.Background(), "gin", ginCtx)
+
+	if got := ExtractClaudeCodeAgentID(ctx, nil); got != "gin-agent" {
+		t.Fatalf("ExtractClaudeCodeAgentID() from context = %q, want gin-agent", got)
+	}
+	headers := http.Header{}
+	headers.Set(ClaudeCodeAgentHeader, " explicit-agent ")
+	if got := ExtractClaudeCodeAgentID(ctx, headers); got != "explicit-agent" {
+		t.Fatalf("ExtractClaudeCodeAgentID() explicit = %q, want explicit-agent", got)
+	}
+	if got := ExtractClaudeCodeAgentID(context.Background(), nil); got != ClaudeCodeMainAgentID {
+		t.Fatalf("ExtractClaudeCodeAgentID() without header = %q, want %q", got, ClaudeCodeMainAgentID)
+	}
+}
+
 func TestClaudeCodePromptCacheStableAcrossRequests(t *testing.T) {
 	ctx := context.Background()
 	payload := []byte(`{"metadata":{"user_id":"{\"session_id\":\"cache-session-2\"}"}}`)
@@ -46,6 +66,68 @@ func TestClaudeCodePromptCacheStableAcrossRequests(t *testing.T) {
 	}
 	if !ok || second.ID != first.ID {
 		t.Fatalf("second cache id = %q, want %q", second.ID, first.ID)
+	}
+}
+
+func TestClaudeCodePromptCacheStableWithoutProcessCacheState(t *testing.T) {
+	ctx := context.Background()
+	payload := []byte(`{"metadata":{"user_id":"{\"session_id\":\"durable-session\"}"}}`)
+
+	first, ok, err := ClaudeCodePromptCache(ctx, "gpt-5.6-sol(xhigh)", payload, nil)
+	if err != nil || !ok {
+		t.Fatalf("ClaudeCodePromptCache first = %#v, ok=%v, err=%v", first, ok, err)
+	}
+
+	codexCacheMu.Lock()
+	codexCacheMap = make(map[string]CodexCache)
+	codexCacheMu.Unlock()
+
+	second, ok, err := ClaudeCodePromptCache(ctx, "gpt-5.6-sol(xhigh)", payload, nil)
+	if err != nil || !ok {
+		t.Fatalf("ClaudeCodePromptCache second = %#v, ok=%v, err=%v", second, ok, err)
+	}
+	if second.ID != first.ID {
+		t.Fatalf("cache ID after reset = %q, want %q", second.ID, first.ID)
+	}
+}
+
+func TestClaudeCodePromptCacheSeparatesModels(t *testing.T) {
+	payload := []byte(`{"metadata":{"user_id":"{\"session_id\":\"model-lane\"}"}}`)
+	first, _, _ := ClaudeCodePromptCache(context.Background(), "gpt-5.6-sol(xhigh)", payload, nil)
+	second, _, _ := ClaudeCodePromptCache(context.Background(), "gpt-5.6-terra(xhigh)", payload, nil)
+	if first.ID == second.ID {
+		t.Fatalf("different models share cache ID %q", first.ID)
+	}
+}
+
+func TestClaudeCodePromptCacheSeparatesAgentsAndKeepsHeaderlessStable(t *testing.T) {
+	payload := []byte(`{"metadata":{"user_id":"{\"session_id\":\"agent-lane\"}"}}`)
+	model := "gpt-5.6-sol(xhigh)"
+	agentAHeaders := http.Header{}
+	agentAHeaders.Set(ClaudeCodeAgentHeader, "agent-a")
+	agentBHeaders := http.Header{}
+	agentBHeaders.Set(ClaudeCodeAgentHeader, "agent-b")
+
+	agentA, ok, err := ClaudeCodePromptCache(context.Background(), model, payload, agentAHeaders)
+	if err != nil || !ok {
+		t.Fatalf("agent A prompt cache = %#v, ok=%v, err=%v", agentA, ok, err)
+	}
+	agentARepeat, _, _ := ClaudeCodePromptCache(context.Background(), model, payload, agentAHeaders)
+	agentB, _, _ := ClaudeCodePromptCache(context.Background(), model, payload, agentBHeaders)
+	if agentA.ID != agentARepeat.ID {
+		t.Fatalf("same agent produced different prompt cache IDs: %q and %q", agentA.ID, agentARepeat.ID)
+	}
+	if agentA.ID == agentB.ID {
+		t.Fatalf("different agents share prompt cache ID %q", agentA.ID)
+	}
+
+	headerless, ok, err := ClaudeCodePromptCache(context.Background(), model, payload, nil)
+	if err != nil || !ok {
+		t.Fatalf("headerless prompt cache = %#v, ok=%v, err=%v", headerless, ok, err)
+	}
+	headerlessRepeat, _, _ := ClaudeCodePromptCache(context.Background(), model, payload, nil)
+	if headerless.ID != headerlessRepeat.ID || headerless.ID == agentA.ID || headerless.ID == agentB.ID {
+		t.Fatalf("headerless prompt cache is not stable and isolated: first=%q repeat=%q agentA=%q agentB=%q", headerless.ID, headerlessRepeat.ID, agentA.ID, agentB.ID)
 	}
 }
 

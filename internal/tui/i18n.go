@@ -93,6 +93,14 @@ var zhStrings = map[string]string{
 	"auth_gate_connecting":        "正在连接...",
 	"auth_gate_connect_fail":      "连接失败：%s",
 	"auth_gate_password_required": "请输入密码",
+	"summary_requests":            "请求",
+	"summary_input":               "输入",
+	"summary_output":              "输出",
+	"summary_cache_misses":        "缓存未命中",
+	"summary_cache_low_reuse":     "缓存低复用",
+	"summary_compactions":         "压缩",
+	"summary_compaction_resets":   "压缩重置",
+	"summary_estimated_cost":      "预估费用",
 
 	// ── Dashboard ──
 	"dashboard_title":  "📊 仪表盘",
@@ -207,13 +215,18 @@ var zhStrings = map[string]string{
 	"usage_time":          "时间",
 
 	// ── Logs ──
-	"logs_title":       "📋 日志",
-	"logs_auto_scroll": "● 自动滚动",
-	"logs_paused":      "○ 已暂停",
-	"logs_filter":      "过滤",
-	"logs_lines":       "行数",
-	"logs_help":        " [a] 自动滚动 • [c] 清除 • [1] 全部 [2] info+ [3] warn+ [4] error • [↑↓] 滚动",
-	"logs_waiting":     "  等待日志输出...",
+	"logs_title":         "📋 日志",
+	"logs_auto_scroll":   "● 自动滚动",
+	"logs_paused":        "○ 已暂停",
+	"logs_filter":        "过滤",
+	"logs_lines":         "行数",
+	"logs_view":          "视图",
+	"logs_view_requests": "请求",
+	"logs_view_raw":      "原始日志",
+	"logs_requests":      "请求",
+	"logs_no_matches":    "  没有符合当前过滤条件的请求。",
+	"logs_help":          " [v] 请求/原始日志 • [a] 自动滚动 • [c] 清除 • [1] 全部 [2] info+ [3] warn+ [4] error • [↑↓] 滚动",
+	"logs_waiting":       "  等待日志输出...",
 }
 
 var enStrings = map[string]string{
@@ -248,6 +261,14 @@ var enStrings = map[string]string{
 	"auth_gate_connecting":        "Connecting...",
 	"auth_gate_connect_fail":      "Connection failed: %s",
 	"auth_gate_password_required": "password is required",
+	"summary_requests":            "Requests",
+	"summary_input":               "In",
+	"summary_output":              "Out",
+	"summary_cache_misses":        "Cache misses",
+	"summary_cache_low_reuse":     "Low cache reuse",
+	"summary_compactions":         "Compactions",
+	"summary_compaction_resets":   "Compaction resets",
+	"summary_estimated_cost":      "Est. cost",
 
 	// ── Dashboard ──
 	"dashboard_title":  "📊 Dashboard",
@@ -362,11 +383,16 @@ var enStrings = map[string]string{
 	"usage_time":          "Time",
 
 	// ── Logs ──
-	"logs_title":       "📋 Logs",
-	"logs_auto_scroll": "● AUTO-SCROLL",
-	"logs_paused":      "○ PAUSED",
-	"logs_filter":      "Filter",
-	"logs_lines":       "Lines",
-	"logs_help":        " [a] Auto-scroll • [c] Clear • [1] All [2] info+ [3] warn+ [4] error • [↑↓] Scroll",
-	"logs_waiting":     "  Waiting for log output...",
+	"logs_title":         "📋 Logs",
+	"logs_auto_scroll":   "● AUTO-SCROLL",
+	"logs_paused":        "○ PAUSED",
+	"logs_filter":        "Filter",
+	"logs_lines":         "Lines",
+	"logs_view":          "View",
+	"logs_view_requests": "REQUESTS",
+	"logs_view_raw":      "RAW",
+	"logs_requests":      "Requests",
+	"logs_no_matches":    "  No requests match this filter.",
+	"logs_help":          " [v] Requests/Raw • [a] Auto-scroll • [c] Clear • [1] All [2] info+ [3] warn+ [4] error • [↑↓] Scroll",
+	"logs_waiting":       "  Waiting for log output...",
 }

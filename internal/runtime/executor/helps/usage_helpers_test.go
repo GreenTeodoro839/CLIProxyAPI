@@ -49,14 +49,51 @@ func TestParseOpenAIUsageResponses(t *testing.T) {
 	if detail.CachedTokens != 7 {
 		t.Fatalf("cached tokens = %d, want %d", detail.CachedTokens, 7)
 	}
-	if detail.CacheReadTokens != 7 {
-		t.Fatalf("cache read tokens = %d, want %d", detail.CacheReadTokens, 7)
+	if detail.CacheReadTokens != 7 || !detail.CacheTelemetryPresent {
+		t.Fatalf("cache telemetry = read:%d present:%t, want read:7 present:true", detail.CacheReadTokens, detail.CacheTelemetryPresent)
 	}
 	if detail.ReasoningTokens != 9 {
 		t.Fatalf("reasoning tokens = %d, want %d", detail.ReasoningTokens, 9)
 	}
 	if detail.ResponseServiceTier != "default" {
 		t.Fatalf("response service tier = %q, want default", detail.ResponseServiceTier)
+	}
+}
+
+func TestParseUsagePreservesExplicitZeroCacheTelemetry(t *testing.T) {
+	openAI := ParseOpenAIUsage([]byte(`{"usage":{"input_tokens":10,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}}`))
+	if !openAI.CacheTelemetryPresent || openAI.CacheReadTokens != 0 {
+		t.Fatalf("openai cache telemetry = %+v, want explicit zero present", openAI)
+	}
+
+	claude := ParseClaudeUsage([]byte(`{"usage":{"input_tokens":10,"output_tokens":1,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}`))
+	if !claude.CacheTelemetryPresent || claude.CacheReadTokens != 0 || claude.CacheCreationTokens != 0 {
+		t.Fatalf("claude cache telemetry = %+v, want explicit zero present", claude)
+	}
+
+	omitted := ParseOpenAIUsage([]byte(`{"usage":{"input_tokens":10,"output_tokens":1}}`))
+	if omitted.CacheTelemetryPresent {
+		t.Fatalf("omitted cache telemetry = %+v, want present false", omitted)
+	}
+}
+
+func TestClaudeStreamUsageBufferMergesStartAndDelta(t *testing.T) {
+	var buffer ClaudeStreamUsageBuffer
+	buffer.ObserveClaudeStream([]byte(`data: {"type":"message_start","message":{"usage":{"input_tokens":12,"output_tokens":1,"cache_read_input_tokens":30,"cache_creation_input_tokens":4,"cache_creation":{"ephemeral_5m_input_tokens":1,"ephemeral_1h_input_tokens":3}}}}`))
+	buffer.ObserveClaudeStream([]byte(`data: {"type":"message_delta","usage":{"output_tokens":9}}`))
+
+	detail, ok := buffer.Detail()
+	if !ok {
+		t.Fatal("expected merged Claude usage")
+	}
+	if detail.InputTokens != 12 || detail.OutputTokens != 9 || detail.CacheReadTokens != 30 || detail.CacheCreationTokens != 4 {
+		t.Fatalf("merged detail = %+v", detail)
+	}
+	if detail.CacheCreation5mTokens != 1 || detail.CacheCreation1hTokens != 3 {
+		t.Fatalf("merged cache creation breakdown = %+v", detail)
+	}
+	if !detail.CacheTelemetryPresent || detail.TotalTokens != 55 {
+		t.Fatalf("merged cache/total detail = %+v", detail)
 	}
 }
 
@@ -86,6 +123,74 @@ func TestParseCodexUsageIncludesCacheWriteTokens(t *testing.T) {
 	}
 	if detail.ResponseServiceTier != "priority" {
 		t.Fatalf("response service tier = %q, want priority", detail.ResponseServiceTier)
+	}
+	if detail.CacheCreationEstimateAvailable || detail.EstimatedCacheCreationTokens != 0 {
+		t.Fatalf("provider-confirmed cache write unexpectedly marked estimated: %+v", detail)
+	}
+}
+
+func TestParseCodexUsagePrefersCacheWriteTokensOverLegacyCreation(t *testing.T) {
+	data := []byte(`{"response":{"usage":{"input_tokens":100,"output_tokens":20,"input_tokens_details":{"cached_tokens":30,"cache_creation_tokens":0,"cache_write_tokens":40}}}}`)
+	detail, ok := ParseCodexUsage(data)
+	if !ok {
+		t.Fatal("ParseCodexUsage() ok = false, want true")
+	}
+	if detail.CacheCreationTokens != 40 {
+		t.Fatalf("cache creation tokens = %d, want cache_write_tokens value 40", detail.CacheCreationTokens)
+	}
+	if detail.CacheCreationEstimateAvailable {
+		t.Fatalf("provider-confirmed cache write unexpectedly marked estimated: %+v", detail)
+	}
+}
+
+func TestParseCodexUsageAddsDisplayOnlyCacheCreationEstimate(t *testing.T) {
+	for _, input := range []string{
+		`{"response":{"usage":{"input_tokens":2048,"output_tokens":20,"total_tokens":2068,"input_tokens_details":{"cached_tokens":512}}}}`,
+		`{"response":{"usage":{"input_tokens":2048,"output_tokens":20,"total_tokens":2068,"input_tokens_details":{"cached_tokens":512,"cache_write_tokens":0}}}}`,
+	} {
+		detail, ok := ParseCodexUsage([]byte(input))
+		if !ok {
+			t.Fatalf("ParseCodexUsage() ok = false; input=%s", input)
+		}
+		if detail.CacheCreationTokens != 0 {
+			t.Fatalf("provider cache creation = %d, want confirmed zero; input=%s", detail.CacheCreationTokens, input)
+		}
+		if !detail.CacheCreationEstimateAvailable || detail.EstimatedCacheCreationTokens != 1536 {
+			t.Fatalf("cache creation estimate = %+v, want available 1536; input=%s", detail, input)
+		}
+		if detail.InputTokens != 2048 || detail.TotalTokens != 2068 {
+			t.Fatalf("provider token totals changed by display estimate: %+v", detail)
+		}
+	}
+}
+
+func TestParseCodexUsageClampsCacheCreationEstimate(t *testing.T) {
+	detail, ok := ParseCodexUsage([]byte(`{"response":{"usage":{"input_tokens":1024,"input_tokens_details":{"cached_tokens":2048,"cache_write_tokens":0}}}}`))
+	if !ok {
+		t.Fatal("ParseCodexUsage() ok = false, want true")
+	}
+	if !detail.CacheCreationEstimateAvailable || detail.EstimatedCacheCreationTokens != 0 {
+		t.Fatalf("clamped cache creation estimate = %+v, want available zero", detail)
+	}
+}
+
+func TestParseCodexUsageDoesNotEstimateBelowCacheEligibilityThreshold(t *testing.T) {
+	detail, ok := ParseCodexUsage([]byte(`{"response":{"usage":{"input_tokens":100,"input_tokens_details":{"cached_tokens":0,"cache_write_tokens":0}}}}`))
+	if !ok {
+		t.Fatal("ParseCodexUsage() ok = false, want true")
+	}
+	if detail.CacheCreationEstimateAvailable || detail.EstimatedCacheCreationTokens != 0 {
+		t.Fatalf("short prompt unexpectedly received cache creation estimate: %+v", detail)
+	}
+}
+
+func TestParseCodexUsageDoesNotEstimateWithoutCacheTelemetry(t *testing.T) {
+	detail, ok := ParseCodexUsage([]byte(`{"response":{"usage":{"input_tokens":100,"output_tokens":20,"total_tokens":120}}}`))
+	if !ok {
+		t.Fatal("ParseCodexUsage() ok = false, want true")
+	}
+	if detail.CacheCreationEstimateAvailable || detail.EstimatedCacheCreationTokens != 0 {
+		t.Fatalf("usage without cache fields unexpectedly estimated creation: %+v", detail)
 	}
 }
 
@@ -263,7 +368,7 @@ func TestStreamUsageBufferPreservesOnlyZeroUsage(t *testing.T) {
 }
 
 func TestParseClaudeUsageIncludesCacheTokensInTotal(t *testing.T) {
-	data := []byte(`{"usage":{"input_tokens":3085,"output_tokens":253,"cache_read_input_tokens":7,"cache_creation_input_tokens":19514}}`)
+	data := []byte(`{"usage":{"input_tokens":3085,"output_tokens":253,"cache_read_input_tokens":7,"cache_creation_input_tokens":19514,"cache_creation":{"ephemeral_5m_input_tokens":14,"ephemeral_1h_input_tokens":19500}}}`)
 	detail := ParseClaudeUsage(data)
 	if detail.InputTokens != 3085 {
 		t.Fatalf("input tokens = %d, want %d", detail.InputTokens, 3085)
@@ -277,11 +382,34 @@ func TestParseClaudeUsageIncludesCacheTokensInTotal(t *testing.T) {
 	if detail.CacheCreationTokens != 19514 {
 		t.Fatalf("cache creation tokens = %d, want %d", detail.CacheCreationTokens, 19514)
 	}
+	if detail.CacheCreation5mTokens != 14 || detail.CacheCreation1hTokens != 19500 {
+		t.Fatalf("cache creation TTL breakdown = %d/%d, want 14/19500", detail.CacheCreation5mTokens, detail.CacheCreation1hTokens)
+	}
 	if detail.CachedTokens != 7 {
 		t.Fatalf("cached tokens = %d, want %d", detail.CachedTokens, 7)
 	}
 	if detail.TotalTokens != 22859 {
 		t.Fatalf("total tokens = %d, want %d", detail.TotalTokens, 22859)
+	}
+}
+
+func TestParseClaudeUsageDerivesCreationTotalFromTTLBreakdown(t *testing.T) {
+	detail := ParseClaudeUsage([]byte(`{"usage":{"input_tokens":3,"output_tokens":2,"cache_creation":{"ephemeral_5m_input_tokens":4,"ephemeral_1h_input_tokens":6}}}`))
+	if detail.CacheCreationTokens != 10 || detail.CacheCreation5mTokens != 4 || detail.CacheCreation1hTokens != 6 {
+		t.Fatalf("cache creation detail = %+v, want total/5m/1h 10/4/6", detail)
+	}
+	if !detail.CacheTelemetryPresent || detail.TotalTokens != 15 {
+		t.Fatalf("cache telemetry/total = %+v, want present and total 15", detail)
+	}
+}
+
+func TestParseClaudeStreamUsageReadsMessageStartTTLBreakdown(t *testing.T) {
+	detail, ok := ParseClaudeStreamUsage([]byte(`data: {"type":"message_start","message":{"usage":{"input_tokens":3,"cache_creation_input_tokens":10,"cache_creation":{"ephemeral_5m_input_tokens":4,"ephemeral_1h_input_tokens":6}}}}`))
+	if !ok {
+		t.Fatal("ParseClaudeStreamUsage() ok = false, want true")
+	}
+	if detail.CacheCreationTokens != 10 || detail.CacheCreation5mTokens != 4 || detail.CacheCreation1hTokens != 6 {
+		t.Fatalf("stream cache creation detail = %+v, want total/5m/1h 10/4/6", detail)
 	}
 }
 
@@ -323,8 +451,8 @@ func TestParseInteractionsUsage(t *testing.T) {
 	if detail.CachedTokens != 2 {
 		t.Fatalf("cached tokens = %d, want 2", detail.CachedTokens)
 	}
-	if detail.CacheReadTokens != 2 {
-		t.Fatalf("cache read tokens = %d, want 2", detail.CacheReadTokens)
+	if detail.CacheReadTokens != 2 || !detail.CacheTelemetryPresent {
+		t.Fatalf("cache telemetry = read:%d present:%t, want read:2 present:true", detail.CacheReadTokens, detail.CacheTelemetryPresent)
 	}
 }
 
@@ -332,6 +460,16 @@ func TestParseInteractionsUsageNormalizesCacheWriteAlias(t *testing.T) {
 	detail := ParseInteractionsUsage([]byte(`{"usage":{"input_tokens":3,"cache_write_tokens":2}}`))
 	if detail.CacheCreationTokens != 2 {
 		t.Fatalf("cache creation tokens = %d, want 2", detail.CacheCreationTokens)
+	}
+}
+
+func TestParseInteractionsCachedFallbackDoesNotInflateTotal(t *testing.T) {
+	detail := ParseInteractionsUsage([]byte(`{"usage":{"input_tokens":100,"output_tokens":10,"cached_tokens":50}}`))
+	if detail.TotalTokens != 110 {
+		t.Fatalf("total tokens = %d, want 110", detail.TotalTokens)
+	}
+	if detail.CacheReadTokens != 50 || !detail.CacheTelemetryPresent {
+		t.Fatalf("cache telemetry = read:%d present:%t, want read:50 present:true", detail.CacheReadTokens, detail.CacheTelemetryPresent)
 	}
 }
 
@@ -431,6 +569,15 @@ func TestUsageReporterBuildRecordIncludesRequestedModelAlias(t *testing.T) {
 	}
 	if record.Alias != "client-gpt" {
 		t.Fatalf("alias = %q, want %q", record.Alias, "client-gpt")
+	}
+}
+
+func TestUsageReporterBuildRecordIncludesOperation(t *testing.T) {
+	reporter := NewUsageReporter(context.Background(), "codex", "gpt-5.6-sol", nil)
+	reporter.SetOperation(" COMPACTION ")
+	record := reporter.buildRecord(usage.Detail{}, false)
+	if record.Operation != "compaction" {
+		t.Fatalf("operation = %q, want compaction", record.Operation)
 	}
 }
 
